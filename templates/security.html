@@ -31,6 +31,13 @@
             <span>Profile</span>
           </a>
           <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="profileDropdown">
+            <li>
+              <span class="dropdown-item-text small text-muted">Session Timeout: <span id="sessionTimeoutDisplay">{{ session_timeout // 60 }} min</span></span>
+            </li>
+            <li>
+              <span class="dropdown-item-text small text-muted">Time Left: <span id="sessionTimeLeftDisplay">{% if session_time_left is not none %}{{ session_time_left }}{% else %}N/A{% endif %}</span></span>
+            </li>
+            <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item" href="/profile">Profile</a></li>
             <li><a class="dropdown-item" href="/security">Security</a></li>
             <li><hr class="dropdown-divider"></li>
@@ -89,5 +96,22 @@
         </div>
     </div>
 </div>
+<script src="/static/session_timer.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    var displayElem = document.getElementById('sessionTimeLeftDisplay');
+    if (displayElem) {
+      new SessionTimer({
+        timeLeft: {{ session_time_left|default(0) }},
+        timeout: {{ session_timeout|default(0) }},
+        displayElem: displayElem,
+        warningThreshold: 60,
+        onExpired: function() {
+          displayElem.textContent = 'Expired';
+        }
+      });
+    }
+  });
+</script>
 </body>
 </html>

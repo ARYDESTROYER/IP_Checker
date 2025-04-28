@@ -1,8 +1,8 @@
-requests
-python-dotenv
 Flask
 Flask-SQLAlchemy
 Werkzeug
+python-dotenv
 pyotp
-qrcode
 pillow
+qrcode
+requests

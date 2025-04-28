@@ -27,3 +27,8 @@ class User(db.Model):
 
     def is_admin(self):
         return self.role == 'admin'
+
+class Setting(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(64), unique=True, nullable=False)
+    value = db.Column(db.String(128), nullable=False)

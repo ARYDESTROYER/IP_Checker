@@ -1,7 +1,7 @@
 import os
 from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file
 from dotenv import load_dotenv
-from models import db, User
+from models import db, User, Setting
 from utils import is_valid_username, is_valid_email, is_valid_password
 from ip_checker import (
     is_valid_ip,
@@ -16,6 +16,7 @@ import pyotp
 import qrcode
 import io
 import base64
+from datetime import datetime, timedelta
 
 load_dotenv()
 
@@ -63,6 +64,21 @@ def check_force_password_reset():
         if user and getattr(user, 'force_password_reset', False):
             if request.endpoint not in allowed_routes and not request.endpoint.startswith('static'):
                 return redirect(url_for('reset_password'))
+
+@app.before_request
+def session_timeout_check():
+    allowed_routes = ['static', 'login', 'logout', 'register', 'mfa_verify', 'reset_password']
+    if 'user_id' in session:
+        # Get session timeout from settings
+        timeout_setting = Setting.query.filter_by(key='session_timeout').first()
+        session_timeout = int(timeout_setting.value) if timeout_setting else 1800
+        last_activity = session.get('last_activity')
+        now = datetime.utcnow().timestamp()
+        if last_activity and now - last_activity > session_timeout:
+            session.clear()
+            flash('Session timed out due to inactivity. Please log in again.')
+            return redirect(url_for('login'))
+        session['last_activity'] = now
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -144,26 +160,41 @@ def logout():
 @admin_required
 def admin():
     users = User.query.all()
+    timeout_setting = Setting.query.filter_by(key='session_timeout').first()
+    session_timeout = int(timeout_setting.value) if timeout_setting else 1800
     if request.method == 'POST':
         action = request.form.get('action')
-        user_id = request.form.get('user_id')
-        user = User.query.get(user_id)
-        if action == 'set_status':
-            new_status = request.form.get('new_status')
-            user.status = new_status
-            db.session.commit()
-            flash(f"Status for {user.email} set to {new_status}.")
-        elif action == 'set_role':
-            new_role = request.form.get('new_role')
-            user.role = new_role
-            db.session.commit()
-            flash(f"Role for {user.email} set to {new_role}.")
-        elif action == 'force_reset':
-            user.force_password_reset = True
-            db.session.commit()
-            flash(f"Password reset required for {user.email}.")
+        if action == 'set_timeout':
+            new_timeout = request.form.get('session_timeout')
+            if new_timeout and new_timeout.isdigit() and int(new_timeout) >= 60:
+                if timeout_setting:
+                    timeout_setting.value = str(int(new_timeout))
+                else:
+                    db.session.add(Setting(key='session_timeout', value=str(int(new_timeout))))
+                db.session.commit()
+                flash('Session timeout updated!')
+            else:
+                flash('Please enter a valid timeout (minimum 60 seconds).')
+        else:
+            user_id = request.form.get('user_id')
+            user = User.query.get(user_id)
+            if not user:
+                flash('User not found.')
+                return redirect(url_for('admin'))
+            if action == 'set_status':
+                user.status = request.form.get('new_status')
+                db.session.commit()
+                flash('User status updated!')
+            elif action == 'set_role':
+                user.role = request.form.get('new_role')
+                db.session.commit()
+                flash('User role updated!')
+            elif action == 'force_reset':
+                user.force_password_reset = True
+                db.session.commit()
+                flash('User will be required to reset password.')
         return redirect(url_for('admin'))
-    return render_template('admin.html', users=users)
+    return render_template('admin.html', users=users, session_timeout=session_timeout)
 
 @app.route('/reset-password', methods=['GET', 'POST'])
 def reset_password():
@@ -289,6 +320,22 @@ def regenerate_mfa():
     db.session.commit()
     flash('MFA secret regenerated. Please scan the new code.')
     return redirect(url_for('security'))
+
+@app.context_processor
+def inject_session_info():
+    session_timeout = 1800
+    time_left = None
+    if 'user_id' in session:
+        timeout_setting = Setting.query.filter_by(key='session_timeout').first()
+        session_timeout = int(timeout_setting.value) if timeout_setting else 1800
+        last_activity = session.get('last_activity')
+        if last_activity:
+            from datetime import datetime
+            now = datetime.utcnow().timestamp()
+            time_left = int(session_timeout - (now - float(last_activity)))
+            if time_left < 0:
+                time_left = 0
+    return dict(session_timeout=session_timeout, session_time_left=time_left)
 
 # --- Ensure all other routes redirect to login if not logged in ---
 @app.errorhandler(401)
