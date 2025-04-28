@@ -41,23 +41,46 @@
         </div>
     {% endif %}
     {% if reports %}
-        <div class="row">
+        <div class="d-flex flex-column gap-4">
             {% for report in reports %}
-                <div class="col-md-6 mb-4">
-                    <div class="card h-100">
-                        <div class="card-header bg-secondary text-white">{{ report.source }}</div>
-                        <div class="card-body">
-                            {% if report.error %}
-                                <div class="text-danger">Error: {{ report.error }}</div>
-                            {% elif report.data %}
-                                <ul class="list-group list-group-flush">
-                                    {% for key, value in report.data.items() %}
-                                        <li class="list-group-item"><strong>{{ key }}:</strong> {{ value }}</li>
-                                    {% endfor %}
-                                </ul>
-                            {% else %}
-                                <div>No data received.</div>
-                            {% endif %}
+                <div class="d-flex flex-row align-items-center justify-content-between">
+                    <div class="flex-grow-1">
+                        <div class="card mb-0">
+                            <div class="card-header bg-secondary text-white">{{ report.source }}</div>
+                            <div class="card-body">
+                                {% if report.error %}
+                                    <div class="text-danger">Error: {{ report.error }}</div>
+                                {% elif report.data %}
+                                    <ul class="list-group list-group-flush">
+                                        {% for key, value in report.data.items() %}
+                                            <li class="list-group-item"><strong>{{ key }}:</strong> {{ value }}</li>
+                                        {% endfor %}
+                                    </ul>
+                                {% else %}
+                                    <div>No data received.</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="ms-4" style="min-width:120px;">
+                        {% set score = None %}
+                        {% set max_score = None %}
+                        {% if report.source == 'VirusTotal' and report.data %}
+                            {% set score = report.data['Malicious'] %}
+                            {% set max_score = 94 %}
+                        {% elif report.source == 'AbuseIPDB' and report.data %}
+                            {% set score = report.data['Abuse Confidence Score'] %}
+                            {% set max_score = 100 %}
+                        {% elif report.source == 'Pulsedive' and report.data %}
+                            {% set score = report.data['Risk Level'] %}
+                            {% set max_score = 10 %}
+                        {% elif report.source == 'GreyNoise' and report.data %}
+                            {% set score = 0 if report.data['Classification'] == 'benign' else (5 if report.data['Classification'] == 'unknown' else 10) %}
+                            {% set max_score = 10 %}
+                        {% endif %}
+                        <div>
+                            <canvas class="gauge-meter" width="90" height="90" data-score="{{ score }}" data-max="{{ max_score }}"></canvas>
+                            <div class="text-center mt-1 small">Score</div>
                         </div>
                     </div>
                 </div>
@@ -65,5 +88,62 @@
         </div>
     {% endif %}
 </div>
+<script>
+// Gauge rendering script
+function drawGauge(canvas, score, max) {
+    if (!canvas) return;
+    var ctx = canvas.getContext('2d');
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    var percent = (score === null || max === null || isNaN(score) || isNaN(max) || max == 0) ? null : (score/max);
+    // Gauge background
+    ctx.beginPath();
+    ctx.arc(45,45,40,Math.PI,2*Math.PI);
+    ctx.strokeStyle = '#222b3a';
+    ctx.lineWidth = 10;
+    ctx.stroke();
+    // Gauge fill
+    if (percent !== null) {
+        var start = Math.PI;
+        var end = Math.PI + Math.PI * percent;
+        ctx.beginPath();
+        ctx.arc(45,45,40,start,end);
+        // Color logic
+        var color = '#aaa';
+        if (percent < 0.15) color = '#2ecc40'; // green
+        else if (percent < 0.4) color = '#ffdc00'; // yellow
+        else color = '#ff4136'; // red
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 10;
+        ctx.stroke();
+        // Score text
+        ctx.font = 'bold 28px sans-serif';
+        ctx.fillStyle = color;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(score,45,45);
+        ctx.font = 'bold 13px sans-serif';
+        ctx.fillStyle = '#889';
+        ctx.fillText('/ ' + max,45,65);
+    } else {
+        // Not rated
+        ctx.font = 'bold 18px sans-serif';
+        ctx.fillStyle = '#bbb';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('N/A',45,50);
+    }
+}
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.gauge-meter').forEach(function(canvas) {
+        var score = parseFloat(canvas.dataset.score);
+        var max = parseFloat(canvas.dataset.max);
+        if (isNaN(score) || isNaN(max)) {
+            drawGauge(canvas, null, null);
+        } else {
+            drawGauge(canvas, score, max);
+        }
+    });
+});
+</script>
 </body>
 </html>
