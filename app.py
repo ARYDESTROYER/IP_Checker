@@ -1,5 +1,5 @@
 import os
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file
 from dotenv import load_dotenv
 from models import db, User
 from utils import is_valid_username, is_valid_email, is_valid_password
@@ -12,6 +12,10 @@ from ip_checker import (
     get_greynoise_rep
 )
 from functools import wraps
+import pyotp
+import qrcode
+import io
+import base64
 
 load_dotenv()
 
@@ -90,20 +94,36 @@ def login():
             user = User.query.filter_by(email=username_email.lower()).first()
         elif is_valid_username(username_email):
             user = User.query.filter_by(username=username_email).first()
+        if user and user.check_password(password):
+            if user.mfa_enabled:
+                session['pre_mfa_user_id'] = user.id
+                return redirect(url_for('mfa_verify'))
+            else:
+                session['user_id'] = user.id
+                session['role'] = 'admin' if user.is_admin() else 'user'
+                flash('Logged in successfully!')
+                return redirect(url_for('index'))
         else:
-            flash('Invalid username/email format.')
-            return render_template('login.html')
-        if not user or not user.check_password(password):
-            flash('Invalid credentials.')
-            return render_template('login.html')
-        session['user_id'] = user.id
-        session['role'] = user.role
-        session['status'] = user.status
-        if user.status != 'active':
-            flash('Your account is pending admin approval.')
-            return render_template('login.html')
-        return redirect(url_for('index'))
+            flash('Invalid credentials. Please try again.')
     return render_template('login.html')
+
+@app.route('/mfa-verify', methods=['GET', 'POST'])
+def mfa_verify():
+    if 'pre_mfa_user_id' not in session:
+        return redirect(url_for('login'))
+    user = User.query.get(session['pre_mfa_user_id'])
+    if request.method == 'POST':
+        code = request.form.get('code')
+        totp = pyotp.TOTP(user.mfa_secret)
+        if totp.verify(code):
+            session['user_id'] = user.id
+            session['role'] = 'admin' if user.is_admin() else 'user'
+            session.pop('pre_mfa_user_id', None)
+            flash('Logged in successfully!')
+            return redirect(url_for('index'))
+        else:
+            flash('Invalid MFA code. Please try again.')
+    return render_template('mfa_verify.html', email=user.email)
 
 @app.route('/logout')
 @login_required
@@ -147,6 +167,77 @@ def index():
                 get_greynoise_rep(ip, os.getenv('GREYNOISE_API_KEY')),
             ]
     return render_template('index.html', ip=ip, ip_info=ip_info, reports=reports, error=error)
+
+@app.route('/security', methods=['GET'])
+@login_required
+def security():
+    user = User.query.get(session['user_id'])
+    mfa_enabled = user.mfa_enabled
+    mfa_verified = False
+    qr_code_url = None
+    # DEBUG: print MFA state for troubleshooting
+    print(f"[DEBUG] mfa_secret={user.mfa_secret}, mfa_enabled={user.mfa_enabled}")
+    if user.mfa_secret and not user.mfa_enabled:
+        totp = pyotp.TOTP(user.mfa_secret)
+        uri = totp.provisioning_uri(name=user.email, issuer_name="IP Reputation Checker")
+        print(f"[DEBUG] TOTP URI: {uri}")
+        qr = qrcode.make(uri)
+        buf = io.BytesIO()
+        qr.save(buf, format='PNG')
+        qr_code_url = 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
+        print(f"[DEBUG] QR code generated (length): {len(qr_code_url)}")
+        mfa_verified = False
+    elif user.mfa_enabled:
+        mfa_enabled = True
+        mfa_verified = True
+    else:
+        mfa_enabled = False
+        mfa_verified = False
+    return render_template('security.html', mfa_enabled=mfa_enabled, mfa_verified=mfa_verified, qr_code_url=qr_code_url)
+
+@app.route('/security/start-mfa', methods=['POST'])
+@login_required
+def start_mfa():
+    user = User.query.get(session['user_id'])
+    # Always generate a new secret and clear mfa_enabled to force QR code display
+    user.mfa_secret = pyotp.random_base32()
+    user.mfa_enabled = False
+    db.session.commit()
+    return redirect(url_for('security'))
+
+@app.route('/security/verify-mfa', methods=['POST'])
+@login_required
+def verify_mfa():
+    user = User.query.get(session['user_id'])
+    code = request.form.get('code')
+    totp = pyotp.TOTP(user.mfa_secret)
+    if totp.verify(code):
+        user.mfa_enabled = True
+        db.session.commit()
+        flash('MFA enabled successfully!')
+    else:
+        flash('Invalid code. Please try again.')
+    return redirect(url_for('security'))
+
+@app.route('/security/disable-mfa', methods=['POST'])
+@login_required
+def disable_mfa():
+    user = User.query.get(session['user_id'])
+    user.mfa_secret = None
+    user.mfa_enabled = False
+    db.session.commit()
+    flash('MFA disabled.')
+    return redirect(url_for('security'))
+
+@app.route('/security/regenerate-mfa', methods=['POST'])
+@login_required
+def regenerate_mfa():
+    user = User.query.get(session['user_id'])
+    user.mfa_secret = pyotp.random_base32()
+    user.mfa_enabled = False
+    db.session.commit()
+    flash('MFA secret regenerated. Please scan the new code.')
+    return redirect(url_for('security'))
 
 # --- Ensure all other routes redirect to login if not logged in ---
 @app.errorhandler(401)

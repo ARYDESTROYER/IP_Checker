@@ -11,6 +11,8 @@ class User(db.Model):
     role = db.Column(db.String(20), default='user')  # 'admin' or 'user'
     status = db.Column(db.String(20), default='pending')  # 'pending' or 'active'
     whitelisted = db.Column(db.Boolean, default=False)
+    mfa_secret = db.Column(db.String(32), nullable=True)
+    mfa_enabled = db.Column(db.Boolean, default=False)
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
