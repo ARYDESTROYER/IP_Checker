@@ -55,6 +55,15 @@ def admin_required(f):
     return decorated
 
 # --- Protect all sensitive routes ---
+@app.before_request
+def check_force_password_reset():
+    allowed_routes = ['logout', 'reset_password', 'static', 'login', 'register', 'mfa_verify']
+    if 'user_id' in session:
+        user = User.query.get(session['user_id'])
+        if user and getattr(user, 'force_password_reset', False):
+            if request.endpoint not in allowed_routes and not request.endpoint.startswith('static'):
+                return redirect(url_for('reset_password'))
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
@@ -136,16 +145,58 @@ def logout():
 def admin():
     users = User.query.all()
     if request.method == 'POST':
-        uid = int(request.form['user_id'])
-        action = request.form['action']
-        user = User.query.get(uid)
-        if user:
-            if action == 'approve':
-                user.status = 'active'
-            elif action == 'pending':
-                user.status = 'pending'
+        action = request.form.get('action')
+        user_id = request.form.get('user_id')
+        user = User.query.get(user_id)
+        if action == 'set_status':
+            new_status = request.form.get('new_status')
+            user.status = new_status
             db.session.commit()
+            flash(f"Status for {user.email} set to {new_status}.")
+        elif action == 'set_role':
+            new_role = request.form.get('new_role')
+            user.role = new_role
+            db.session.commit()
+            flash(f"Role for {user.email} set to {new_role}.")
+        elif action == 'force_reset':
+            user.force_password_reset = True
+            db.session.commit()
+            flash(f"Password reset required for {user.email}.")
+        return redirect(url_for('admin'))
     return render_template('admin.html', users=users)
+
+@app.route('/reset-password', methods=['GET', 'POST'])
+def reset_password():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    user = User.query.get(session['user_id'])
+    if request.method == 'POST':
+        new_password = request.form.get('new_password')
+        confirm_password = request.form.get('confirm_password')
+        if new_password and new_password == confirm_password:
+            user.set_password(new_password)
+            user.force_password_reset = False
+            db.session.commit()
+            flash('Password reset successfully!')
+            return redirect(url_for('index'))
+        else:
+            flash('Passwords do not match. Please try again.')
+    return render_template('reset_password.html')
+
+@app.route('/profile', methods=['GET', 'POST'])
+@login_required
+def profile():
+    user = User.query.get(session['user_id'])
+    if request.method == 'POST':
+        display_name = request.form.get('display_name')
+        phone = request.form.get('phone')
+        if display_name:
+            user.username = display_name
+        if phone:
+            user.phone = phone
+        db.session.commit()
+        flash('Profile updated successfully!')
+    return render_template('profile.html', user=user)
 
 @app.route('/', methods=['GET', 'POST'])
 @login_required

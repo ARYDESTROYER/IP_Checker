@@ -13,6 +13,8 @@ class User(db.Model):
     whitelisted = db.Column(db.Boolean, default=False)
     mfa_secret = db.Column(db.String(32), nullable=True)
     mfa_enabled = db.Column(db.Boolean, default=False)
+    force_password_reset = db.Column(db.Boolean, default=False)
+    phone = db.Column(db.String(20), nullable=True)
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)

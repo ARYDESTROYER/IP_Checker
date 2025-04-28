@@ -52,32 +52,49 @@
                 <div class="card-body">
                     <h4 class="mb-4">User Management</h4>
                     <table class="table table-bordered table-hover align-middle">
-                        <thead class="table-light">
+                        <thead class="table-dark">
                             <tr>
-                                <th>ID</th>
-                                <th>Username</th>
                                 <th>Email</th>
-                                <th>Role</th>
+                                <th>Username</th>
                                 <th>Status</th>
-                                <th>Action</th>
+                                <th>Role</th>
+                                <th>MFA Enabled</th>
+                                <th>Force Password Reset</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                         {% for user in users %}
                             <tr>
-                                <td>{{ user.id }}</td>
-                                <td>{{ user.username }}</td>
                                 <td>{{ user.email }}</td>
-                                <td>{{ user.role }}</td>
+                                <td>{{ user.username }}</td>
                                 <td>{{ user.status }}</td>
+                                <td>{{ user.role }}</td>
+                                <td>{% if user.mfa_enabled %}<span class="badge bg-success">Yes</span>{% else %}<span class="badge bg-secondary">No</span>{% endif %}</td>
+                                <td>{% if user.force_password_reset %}<span class="badge bg-warning text-dark">Yes</span>{% else %}<span class="badge bg-secondary">No</span>{% endif %}</td>
                                 <td>
                                     <form method="post" class="d-inline">
                                         <input type="hidden" name="user_id" value="{{ user.id }}">
-                                        {% if user.status == 'pending' %}
-                                            <button name="action" value="approve" class="btn btn-success btn-sm">Approve</button>
-                                        {% elif user.status == 'active' %}
-                                            <button name="action" value="pending" class="btn btn-warning btn-sm">Set Pending</button>
-                                        {% endif %}
+                                        <input type="hidden" name="action" value="set_status">
+                                        <select name="new_status" class="form-select form-select-sm d-inline w-auto">
+                                            <option value="active" {% if user.status == 'active' %}selected{% endif %}>Active</option>
+                                            <option value="pending" {% if user.status == 'pending' %}selected{% endif %}>Pending</option>
+                                        </select>
+                                        <button type="submit" class="btn btn-sm btn-outline-primary">Set Status</button>
+                                    </form>
+                                    <form method="post" class="d-inline ms-1">
+                                        <input type="hidden" name="user_id" value="{{ user.id }}">
+                                        <input type="hidden" name="action" value="set_role">
+                                        <select name="new_role" class="form-select form-select-sm d-inline w-auto">
+                                            <option value="user" {% if user.role == 'user' %}selected{% endif %}>User</option>
+                                            <option value="admin" {% if user.role == 'admin' %}selected{% endif %}>Admin</option>
+                                        </select>
+                                        <button type="submit" class="btn btn-sm btn-outline-secondary">Set Role</button>
+                                    </form>
+                                    <form method="post" class="d-inline ms-1">
+                                        <input type="hidden" name="user_id" value="{{ user.id }}">
+                                        <input type="hidden" name="action" value="force_reset">
+                                        <button type="submit" class="btn btn-sm btn-warning">Force Password Reset</button>
                                     </form>
                                 </td>
                             </tr>
